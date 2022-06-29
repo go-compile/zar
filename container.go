@@ -2,11 +2,16 @@ package zar
 
 import (
 	"crypto/aes"
-	"io"
 )
 
-type Container struct {
-	Content io.Reader
+// Header is the first 7 bytes of a file and contains metadata
+// on how to open it
+type Header struct {
+	MagicNumber [3]byte
+	Mode        uint8
+	CipherSuite uint8
+	Mac         uint8
+	Compression uint8
 }
 
 // Index stores the metadata for each file and acts as the almanac
