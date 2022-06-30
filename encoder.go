@@ -145,10 +145,6 @@ func (e *Encoder) Close() error {
 func (e *Encoder) writeAlmanac() error {
 	almanacOffset := e.stream.size
 	w := brotli.NewWriterLevel(e.stream, e.compression)
-	defer func() {
-		e.blockW.Flush()
-		e.blockW.Close()
-	}()
 
 	// write array size of almanac
 	fileCount := make([]byte, 8)
@@ -205,6 +201,16 @@ func (e *Encoder) writeAlmanac() error {
 		return err
 	}
 
+	// finalise compression
+	e.blockW.Flush()
+	e.blockW.Close()
+
+	// write almanac offset
+	binary.BigEndian.PutUint64(buf, almanacOffset)
+	if _, err := e.stream.Write(buf); err != nil {
+		return err
+	}
+
 	// pad ciphertext
 	padding := pkcs5(e.stream.size, e.cipherBlockSize)
 	if _, err := e.stream.Write(padding); err != nil {
@@ -213,12 +219,6 @@ func (e *Encoder) writeAlmanac() error {
 
 	// append EtM master Mac
 	if _, err := e.w.Write(e.stream.MAC()); err != nil {
-		return err
-	}
-
-	// write almanac offset
-	binary.BigEndian.PutUint64(buf, almanacOffset)
-	if _, err := e.w.Write(buf); err != nil {
 		return err
 	}
 
