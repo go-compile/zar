@@ -16,7 +16,11 @@ Encrypted Body
     - []CompressedBlock
         - []FileContents
         - SipHash
-    - Almanac/index
+    - Almanac
+        - []FileMetaData
+        - SipHash
+    - Almanac Offset
+    - MAC
 ```
 
 ```
