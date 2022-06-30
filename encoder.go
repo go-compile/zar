@@ -16,11 +16,16 @@ import (
 	"golang.org/x/crypto/hkdf"
 )
 
-// CompressionBlockTarget is the "soft minimum" size of a compression block
-//
-// A block can be smaller but only if its the last block
-const CompressionBlockTarget uint64 = 1000 //1mb
+const (
+	// CompressionBlockTarget is the "soft minimum" size of a compression block
+	//
+	// A block can be smaller but only if its the last block
+	CompressionBlockTarget uint64 = 1000 //1mb
+	// SaltSize is for the KDF
+	SaltSize = 16
+)
 
+// Encoder writes the archive
 type Encoder struct {
 	w io.Writer
 
@@ -44,8 +49,9 @@ type Encoder struct {
 
 // New creates a new ZAR encoder
 func New(w io.Writer, key []byte) (*Encoder, error) {
+	// TODO: write header
 	// TODO: accept options; KDF, MAC, HKDF CHF
-	salt := make([]byte, 16)
+	salt := make([]byte, SaltSize)
 	if _, err := io.ReadFull(rand.Reader, salt); err != nil {
 		return nil, err
 	}
