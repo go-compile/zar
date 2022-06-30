@@ -3,7 +3,6 @@ package zar
 import (
 	"bytes"
 	"fmt"
-	"os"
 	"testing"
 )
 
@@ -21,10 +20,11 @@ func TestDecodeBlock(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	fmt.Println(string(archive))
+	fmt.Println(len(archive))
+	fmt.Println(len(archive) / 16)
 	fmt.Println("===========")
 	fmt.Println(d.Extract(""))
-	fmt.Println(d.decryptBlocks(1, 10, d.iv, os.Stdout))
+	// fmt.Println(d.decryptBlocks(1, 10, d.iv, os.Stdout))
 
 }
 
@@ -48,7 +48,7 @@ func encodeArchive() ([]byte, error) {
 	}
 
 	buf = bytes.NewBuffer([]byte("mid 18th Century"))
-	_, err = archive.Add("/test2.txt", 0, buf)
+	_, err = archive.Add("/test3.txt", 0, buf)
 	if err != nil {
 		return nil, err
 	}

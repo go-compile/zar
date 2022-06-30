@@ -1,10 +1,13 @@
 package zar
 
 import (
+	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/sha512"
+	"encoding/binary"
 	"errors"
+	"fmt"
 	"hash"
 	"io"
 	"math/big"
@@ -47,6 +50,7 @@ func NewDecoder(r io.ReaderAt, key []byte, size int64) (*Decoder, error) {
 func (d *Decoder) Extract(output string) error {
 	r := d.r
 
+	// TODO: decide weather to combine salt & iv into one value
 	salt := make([]byte, SaltSize)
 	d.iv = make([]byte, aes.BlockSize)
 
@@ -92,7 +96,26 @@ func (d *Decoder) Extract(output string) error {
 
 	d.block = block
 
+	ivBuf := make([]byte, d.cipherBlockSize)
+
+	fmt.Println("Offset")
+	fmt.Println(d.almanacOffset(ivBuf))
+
 	return nil
+}
+
+func (d *Decoder) almanacOffset(ivBuf []byte) (uint64, error) {
+	// decrypt last 2 ciphertext blocks
+	lastBlock := (d.size - d.bodyOffset - 64) / d.cipherBlockSize
+	lastBlocks := bytes.NewBuffer(nil)
+	if err := d.decryptBlocks(lastBlock-2, lastBlock, ivBuf, lastBlocks); err != nil {
+		return 0, err
+	}
+
+	almanacOffset := pkcs5Unmarshal(lastBlocks.Bytes())
+	almanacOffset = almanacOffset[len(almanacOffset)-8:]
+
+	return binary.BigEndian.Uint64(almanacOffset), nil
 }
 
 func readAtFull(r io.ReaderAt, p []byte, offset int64) (int, error) {
