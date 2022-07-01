@@ -186,7 +186,7 @@ func (d *Decoder) decryptBlocks(start, finish int64, ivBuf []byte, w io.Writer) 
 
 		// encrypt input and write mac using cipher text (Encrypt then Mac, EtM)
 		c.XORKeyStream(p[:n], p[:n])
-		_, err = d.mac.Write(p[:n])
+		_, err = d.masterMac.Write(p[:n])
 		if err != nil {
 			return err
 		}

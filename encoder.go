@@ -152,19 +152,27 @@ func (e *Encoder) writeAlmanac() error {
 		return err
 	}
 
+	e.blockMac.Write(fileCount)
+
 	buf := make([]byte, 8)
 	for i := 0; i < len(e.index); i++ {
 		// write block offset
 		binary.BigEndian.PutUint64(buf, e.index[i].Block)
 		if _, err := w.Write(buf); err != nil {
 			return err
-
 		}
+
+		// compute message authentication code
+		e.blockMac.Write(buf)
+
 		// write file size
 		binary.BigEndian.PutUint64(buf, e.index[i].Size)
 		if _, err := w.Write(buf); err != nil {
 			return err
 		}
+
+		// compute message authentication code
+		e.blockMac.Write(buf)
 
 		// write modified date
 		binary.BigEndian.PutUint64(buf, e.index[i].Modified)
@@ -172,16 +180,25 @@ func (e *Encoder) writeAlmanac() error {
 			return err
 		}
 
+		// compute message authentication code
+		e.blockMac.Write(buf)
+
 		// write file name length
 		binary.BigEndian.PutUint16(buf, uint16(len(e.index[i].Name)))
 		if _, err := w.Write(buf[:2]); err != nil {
 			return err
 		}
 
+		// compute message authentication code
+		e.blockMac.Write(buf[:2])
+
 		// write file name
 		if _, err := w.Write([]byte(e.index[i].Name)); err != nil {
 			return err
 		}
+
+		// compute message authentication code
+		e.blockMac.Write([]byte(e.index[i].Name))
 	}
 
 	// write note length
@@ -190,15 +207,23 @@ func (e *Encoder) writeAlmanac() error {
 		return err
 	}
 
+	// compute message authentication code
+	e.blockMac.Write(buf[:2])
+
 	// write note
-	if _, err := w.Write([]byte(e.note)); err != nil {
+	if _, err := w.Write(e.note); err != nil {
 		return err
 	}
+
+	// compute message authentication code
+	e.blockMac.Write(e.note)
 
 	// write almanac mac
 	if _, err := w.Write([]byte(e.blockMac.Sum(nil))); err != nil {
 		return err
 	}
+
+	e.blockMac.Reset()
 
 	// finalise compression
 	if err := w.Close(); err != nil {

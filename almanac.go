@@ -1,8 +1,10 @@
 package zar
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
+	"hash"
 	"io"
 
 	"github.com/andybalholm/brotli"
@@ -11,7 +13,7 @@ import (
 var (
 	// ErrIntegrityFailed is returned when a computed and actual MAC does not
 	// match
-	ErrIntegrityFailed = errors.New("integrity check failed")
+	ErrIntegrityFailed = errors.New("message authentication code failed")
 )
 
 func (d *Decoder) unmarshalAlmanac(r io.Reader, offset int64) (*Almanac, error) {
@@ -22,21 +24,10 @@ func (d *Decoder) unmarshalAlmanac(r io.Reader, offset int64) (*Almanac, error) 
 		return nil, err
 	}
 
-	// read SipHash
-	// if _, err := io.ReadFull(r, buf); err != nil {
-	// 	return nil, err
-	// }
-
-	// if !bytes.Equal(h.Sum(nil), buf) {
-	// 	return nil, ErrIntegrityFailed
-	// }
-
-	// h.Reset()
-
-	return decodeAlmanac(brotli.NewReader(r))
+	return decodeAlmanac(brotli.NewReader(r), d.mac)
 }
 
-func decodeAlmanac(r io.Reader) (*Almanac, error) {
+func decodeAlmanac(r io.Reader, h hash.Hash) (*Almanac, error) {
 
 	buf := make([]byte, 8)
 
@@ -44,6 +35,9 @@ func decodeAlmanac(r io.Reader) (*Almanac, error) {
 	if _, err := io.ReadFull(r, buf); err != nil {
 		return nil, err
 	}
+
+	// compute SipHash
+	h.Write(buf)
 
 	fileCount := binary.BigEndian.Uint64(buf)
 	almanac := &Almanac{
@@ -78,6 +72,13 @@ func decodeAlmanac(r io.Reader) (*Almanac, error) {
 			return nil, err
 		}
 
+		// compute SipHash continued
+		h.Write(block)
+		h.Write(size)
+		h.Write(modified)
+		h.Write(nameLen)
+		h.Write(name)
+
 		f := File{
 			Block:    binary.BigEndian.Uint64(block),
 			Size:     binary.BigEndian.Uint64(size),
@@ -93,12 +94,27 @@ func decodeAlmanac(r io.Reader) (*Almanac, error) {
 		return nil, err
 	}
 
+	h.Write(nameLen)
+
 	note := make([]byte, binary.BigEndian.Uint16(nameLen))
 	if _, err := io.ReadFull(r, note); err != nil {
 		return nil, err
 	}
 
+	h.Write(note)
+
 	almanac.Note = note
+
+	// read SipHash
+	if _, err := io.ReadFull(r, buf); err != nil {
+		return nil, err
+	}
+
+	if !bytes.Equal(h.Sum(nil), buf) {
+		return nil, ErrIntegrityFailed
+	}
+
+	h.Reset()
 
 	return almanac, nil
 
