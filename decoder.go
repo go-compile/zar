@@ -57,6 +57,23 @@ func NewDecoder(r io.ReaderAt, key []byte, size int64) (*Decoder, error) {
 func (d *Decoder) Extract(output string) error {
 	r := d.r
 
+	if err := d.prepareDecoder(r); err != nil {
+		return err
+	}
+
+	ivBuf := make([]byte, d.cipherBlockSize)
+	almanac, err := getAlmanac(d, ivBuf)
+	if err != nil {
+		return err
+	}
+
+	fmt.Println(almanac)
+
+	return nil
+}
+
+// prepareDecoder will setup the decoder with the appropriate ciphers, IVs, keys etc
+func (d *Decoder) prepareDecoder(r io.ReaderAt) error {
 	salt := make([]byte, aes.BlockSize)
 
 	if _, err := readAtFull(r, salt, 0); err != nil {
@@ -99,14 +116,6 @@ func (d *Decoder) Extract(output string) error {
 
 	d.block = block
 	d.mac = siphash.New(k3)
-
-	ivBuf := make([]byte, d.cipherBlockSize)
-	almanac, err := getAlmanac(d, ivBuf)
-	if err != nil {
-		return err
-	}
-
-	fmt.Println(almanac)
 
 	return nil
 }
