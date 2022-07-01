@@ -12,6 +12,8 @@ import (
 	"io"
 	"math/big"
 
+	"github.com/andybalholm/brotli"
+	"github.com/dchest/siphash"
 	"golang.org/x/crypto/argon2"
 	"golang.org/x/crypto/hkdf"
 )
@@ -26,6 +28,9 @@ type Decoder struct {
 	r   io.ReaderAt
 	key []byte
 
+	// masterMac is used with AES_256_CTR as a EtM MAC
+	masterMac hash.Hash
+	// mac is SipHash for each compression block
 	mac        hash.Hash
 	size       int64
 	bodyOffset int64
@@ -33,6 +38,7 @@ type Decoder struct {
 	block           cipher.Block
 	cipherBlockSize int64
 	iv              []byte
+	compression     int
 }
 
 // NewDecoder creates a new zar archive decoder
@@ -41,9 +47,10 @@ func NewDecoder(r io.ReaderAt, key []byte, size int64) (*Decoder, error) {
 	return &Decoder{
 		r:               r,
 		key:             key,
-		mac:             sha512.New(),
+		masterMac:       sha512.New(),
 		size:            size,
 		cipherBlockSize: aes.BlockSize,
+		compression:     brotli.DefaultCompression,
 	}, nil
 }
 
@@ -95,18 +102,48 @@ func (d *Decoder) Extract(output string) error {
 	}
 
 	d.block = block
+	d.mac = siphash.New(k3)
 
 	ivBuf := make([]byte, d.cipherBlockSize)
+	lastBlock := (d.size - d.bodyOffset - 64) / d.cipherBlockSize
 
-	fmt.Println("Offset")
-	fmt.Println(d.almanacOffset(ivBuf))
+	almanacOffset, err := d.almanacOffset(ivBuf, lastBlock)
+	if err != nil {
+		return err
+	}
+
+	// Calculate the block ID
+	row := (almanacOffset / 16) + 1
+	fmt.Println("Row", row)
+	fmt.Println("Last Block", lastBlock)
+	fmt.Println("Block Offset", ((row*16)+almanacOffset)%16)
+	fmt.Println("Almanac", almanacOffset)
+
+	almanacBuf := bytes.NewBuffer(nil)
+	if err := d.decryptBlocks(int64(row)-1, lastBlock, ivBuf, almanacBuf); err != nil {
+		return err
+	}
+
+	// remove padding and almanac offset
+	almanacBuf.Truncate(len(pkcs5Unmarshal(almanacBuf.Bytes())) - 8)
+
+	fmt.Printf("%x\n", almanacBuf.Bytes())
+	fmt.Printf("%s\n", string(almanacBuf.Bytes()))
+
+	fmt.Println("unmarshalling almanac: ", almanacBuf.Len())
+
+	almanac, err := d.unmarshalAlmanac(almanacBuf, int64(((row*16)+almanacOffset)%16))
+	if err != nil {
+		return err
+	}
+
+	fmt.Println(almanac)
 
 	return nil
 }
 
-func (d *Decoder) almanacOffset(ivBuf []byte) (uint64, error) {
+func (d *Decoder) almanacOffset(ivBuf []byte, lastBlock int64) (uint64, error) {
 	// decrypt last 2 ciphertext blocks
-	lastBlock := (d.size - d.bodyOffset - 64) / d.cipherBlockSize
 	lastBlocks := bytes.NewBuffer(nil)
 	if err := d.decryptBlocks(lastBlock-2, lastBlock, ivBuf, lastBlocks); err != nil {
 		return 0, err

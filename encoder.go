@@ -132,7 +132,6 @@ func (e *Encoder) closeBlock() {
 	e.blockW.Write(e.blockMac.Sum(nil))
 	e.blockMac.Reset()
 
-	e.blockW.Flush()
 	e.blockW.Close()
 }
 
@@ -202,8 +201,9 @@ func (e *Encoder) writeAlmanac() error {
 	}
 
 	// finalise compression
-	e.blockW.Flush()
-	e.blockW.Close()
+	if err := w.Close(); err != nil {
+		return err
+	}
 
 	// write almanac offset
 	binary.BigEndian.PutUint64(buf, almanacOffset)

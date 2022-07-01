@@ -14,8 +14,10 @@ type Header struct {
 	Compression uint8
 }
 
-// Index stores the metadata for each file and acts as the almanac
-type Index struct {
+// Almanac stores the metadata for each file
+type Almanac struct {
+	// Note is a encrypted message included in the archive
+	Note []byte
 	// Files is a list of meta data pointing to the location of each file
 	Files []File
 	// MAC is SipHash used to authenticate this section has not

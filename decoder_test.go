@@ -23,7 +23,10 @@ func TestDecodeBlock(t *testing.T) {
 	fmt.Println(len(archive))
 	fmt.Println(len(archive) / 16)
 	fmt.Println("===========")
-	fmt.Println(d.Extract(""))
+	err = d.Extract("")
+	if err != nil {
+		t.Fatal(err)
+	}
 	// fmt.Println(d.decryptBlocks(1, 10, d.iv, os.Stdout))
 
 }
@@ -53,7 +56,9 @@ func encodeArchive() ([]byte, error) {
 		return nil, err
 	}
 
-	archive.Close()
+	if err := archive.Close(); err != nil {
+		return nil, err
+	}
 
 	return output.Bytes(), nil
 }
