@@ -37,7 +37,7 @@ type Decoder struct {
 
 	block           cipher.Block
 	cipherBlockSize int64
-	iv              []byte
+	salt            []byte
 	compression     int
 }
 
@@ -57,19 +57,15 @@ func NewDecoder(r io.ReaderAt, key []byte, size int64) (*Decoder, error) {
 func (d *Decoder) Extract(output string) error {
 	r := d.r
 
-	// TODO: decide weather to combine salt & iv into one value
-	salt := make([]byte, SaltSize)
-	d.iv = make([]byte, aes.BlockSize)
+	salt := make([]byte, aes.BlockSize)
 
 	if _, err := readAtFull(r, salt, 0); err != nil {
 		return err
 	}
 
-	if _, err := readAtFull(r, d.iv, SaltSize); err != nil {
-		return err
-	}
+	d.salt = salt
 
-	d.bodyOffset = int64(len(salt) + len(d.iv))
+	d.bodyOffset = int64(len(salt) + len(d.salt))
 
 	// Run the key through Argon2Key KDF
 	k1 := argon2.Key(d.key, salt, 1, 20, 1, 32)
@@ -105,34 +101,7 @@ func (d *Decoder) Extract(output string) error {
 	d.mac = siphash.New(k3)
 
 	ivBuf := make([]byte, d.cipherBlockSize)
-	lastBlock := (d.size - d.bodyOffset - 64) / d.cipherBlockSize
-
-	almanacOffset, err := d.almanacOffset(ivBuf, lastBlock)
-	if err != nil {
-		return err
-	}
-
-	// Calculate the block ID
-	row := (almanacOffset / 16) + 1
-	fmt.Println("Row", row)
-	fmt.Println("Last Block", lastBlock)
-	fmt.Println("Block Offset", ((row*16)+almanacOffset)%16)
-	fmt.Println("Almanac", almanacOffset)
-
-	almanacBuf := bytes.NewBuffer(nil)
-	if err := d.decryptBlocks(int64(row)-1, lastBlock, ivBuf, almanacBuf); err != nil {
-		return err
-	}
-
-	// remove padding and almanac offset
-	almanacBuf.Truncate(len(pkcs5Unmarshal(almanacBuf.Bytes())) - 8)
-
-	fmt.Printf("%x\n", almanacBuf.Bytes())
-	fmt.Printf("%s\n", string(almanacBuf.Bytes()))
-
-	fmt.Println("unmarshalling almanac: ", almanacBuf.Len())
-
-	almanac, err := d.unmarshalAlmanac(almanacBuf, int64(((row*16)+almanacOffset)%16))
+	almanac, err := getAlmanac(d, ivBuf)
 	if err != nil {
 		return err
 	}
@@ -171,7 +140,7 @@ func readAtFull(r io.ReaderAt, p []byte, offset int64) (int, error) {
 func (d *Decoder) decryptBlocks(start, finish int64, ivBuf []byte, w io.Writer) error {
 
 	// initialise IV
-	counter := big.NewInt(0).SetBytes(d.iv)
+	counter := big.NewInt(0).SetBytes(d.salt)
 	// increment counter to block
 	counter.Add(counter, big.NewInt(start)).FillBytes(ivBuf)
 
@@ -197,4 +166,31 @@ func (d *Decoder) decryptBlocks(start, finish int64, ivBuf []byte, w io.Writer) 
 	}
 
 	return nil
+}
+
+func getAlmanac(d *Decoder, ivBuf []byte) (*Almanac, error) {
+	lastBlock := (d.size - d.bodyOffset - 64) / d.cipherBlockSize
+
+	almanacOffset, err := d.almanacOffset(ivBuf, lastBlock)
+	if err != nil {
+		return nil, err
+	}
+
+	// Calculate the block ID
+	row := (almanacOffset / 16) + 1
+
+	almanacBuf := bytes.NewBuffer(nil)
+	if err := d.decryptBlocks(int64(row)-1, lastBlock, ivBuf, almanacBuf); err != nil {
+		return nil, err
+	}
+
+	// remove padding and almanac offset
+	almanacBuf.Truncate(len(pkcs5Unmarshal(almanacBuf.Bytes())) - 8)
+
+	almanac, err := d.unmarshalAlmanac(almanacBuf, int64(((row*16)+almanacOffset)%16))
+	if err != nil {
+		return nil, err
+	}
+
+	return almanac, nil
 }

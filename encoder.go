@@ -21,8 +21,6 @@ const (
 	//
 	// A block can be smaller but only if its the last block
 	CompressionBlockTarget uint64 = 1000 //1mb
-	// SaltSize is for the KDF
-	SaltSize = 16
 )
 
 // Encoder writes the archive
@@ -51,7 +49,9 @@ type Encoder struct {
 func New(w io.Writer, key []byte) (*Encoder, error) {
 	// TODO: write header
 	// TODO: accept options; KDF, MAC, HKDF CHF
-	salt := make([]byte, SaltSize)
+
+	// generate salt/IV for KDF and AES
+	salt := make([]byte, aes.BlockSize)
 	if _, err := io.ReadFull(rand.Reader, salt); err != nil {
 		return nil, err
 	}
@@ -94,18 +94,12 @@ func New(w io.Writer, key []byte) (*Encoder, error) {
 		return nil, err
 	}
 
-	// generate IV
-	iv := make([]byte, block.BlockSize())
-	if _, err := io.ReadFull(rand.Reader, iv); err != nil {
-		return nil, err
-	}
-
-	if _, err := w.Write(iv); err != nil {
+	if _, err := w.Write(salt); err != nil {
 		return nil, err
 	}
 
 	// Set mode to CTR
-	c := cipher.NewCTR(block, iv)
+	c := cipher.NewCTR(block, salt)
 
 	// stream output to file
 	stream := newCipher(masterMac, nil, w, c)
