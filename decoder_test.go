@@ -2,7 +2,6 @@ package zar
 
 import (
 	"bytes"
-	"fmt"
 	"testing"
 )
 
@@ -20,10 +19,7 @@ func TestDecodeBlock(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	fmt.Println(len(archive))
-	fmt.Println(len(archive) / 16)
-	fmt.Println("===========")
-	err = d.Extract("")
+	err = d.Extract("./testdata/extract")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,19 +35,19 @@ func encodeArchive() ([]byte, error) {
 	}
 
 	buf := bytes.NewBuffer([]byte("my file contents..."))
-	_, err = archive.Add("/test.txt", 0, buf)
+	_, err = archive.Add("test.txt", 0, buf)
 	if err != nil {
 		return nil, err
 	}
 
 	buf = bytes.NewBuffer([]byte("another file"))
-	_, err = archive.Add("/test2.txt", 0, buf)
+	_, err = archive.Add("test2.txt", 0, buf)
 	if err != nil {
 		return nil, err
 	}
 
 	buf = bytes.NewBuffer([]byte("mid 18th Century"))
-	_, err = archive.Add("/test3.txt", 0, buf)
+	_, err = archive.Add("some/file.txt", 0, buf)
 	if err != nil {
 		return nil, err
 	}
