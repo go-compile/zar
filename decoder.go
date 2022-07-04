@@ -7,10 +7,11 @@ import (
 	"crypto/sha512"
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"hash"
 	"io"
 	"math/big"
+	"os"
+	"path/filepath"
 
 	"github.com/andybalholm/brotli"
 	"github.com/dchest/siphash"
@@ -21,6 +22,15 @@ import (
 var (
 	// ErrShotRead is returned when read didn't fill buffer
 	ErrShotRead = errors.New("short read")
+	// ErrFileName is returned when the file name is invalid
+	ErrFileName = errors.New("file name invalid")
+	// ErrFilesTooMany is returned when a compression block has more files
+	// than the maximum
+	ErrFilesTooMany = errors.New("too many files in compression block")
+)
+
+const (
+	filePermissions = 0666
 )
 
 // Decoder will take a reader of the archive file
@@ -39,6 +49,9 @@ type Decoder struct {
 	cipherBlockSize int64
 	salt            []byte
 	compression     int
+
+	// output is the directory to write files to
+	output string
 }
 
 // NewDecoder creates a new zar archive decoder
@@ -56,6 +69,7 @@ func NewDecoder(r io.ReaderAt, key []byte, size int64) (*Decoder, error) {
 
 func (d *Decoder) Extract(output string) error {
 	r := d.r
+	d.output = output
 
 	if err := d.prepareDecoder(r); err != nil {
 		return err
@@ -67,7 +81,48 @@ func (d *Decoder) Extract(output string) error {
 		return err
 	}
 
-	fmt.Println(almanac)
+	blocks := compressionBlocks(almanac.Files)
+	for _, block := range blocks {
+		if err := d.extractBlock(block, ivBuf); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (d *Decoder) extractBlock(compressionBlock []File, ivBuf []byte) error {
+	// validate compression block
+	if len(compressionBlock) > CompressionBlockMaxFiles {
+		return ErrFilesTooMany
+	}
+
+	// create a list of file descriptors
+	fds := make([]*os.File, 0, len(compressionBlock))
+	defer func() {
+		// close all descriptors on exit
+		for _, f := range fds {
+			f.Close()
+		}
+	}()
+
+	// create directory structure and open files
+	for _, f := range compressionBlock {
+		if !validateName(f.Name) {
+			return ErrFileName
+		}
+
+		// create path & file
+		f, err := createPath(filepath.Join(d.output, f.Name))
+		if err != nil {
+			return err
+		}
+
+		fds = append(fds, f)
+	}
+
+	// 	// d.decryptBlocks(int64(f.CipherBlock()), 0, ivBuf, nil)
+	// }
 
 	return nil
 }
@@ -202,4 +257,13 @@ func getAlmanac(d *Decoder, ivBuf []byte) (*Almanac, error) {
 	}
 
 	return almanac, nil
+}
+
+func createPath(path string) (*os.File, error) {
+
+	if err := os.MkdirAll(filepath.Dir(path), os.ModeExclusive); err != nil {
+		return nil, err
+	}
+
+	return os.OpenFile(path, os.O_CREATE|os.O_WRONLY, filePermissions)
 }
