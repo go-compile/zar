@@ -21,6 +21,9 @@ const (
 	//
 	// A block can be smaller but only if its the last block
 	CompressionBlockTarget uint64 = 1000 //1mb
+	// CompressionBlockMaxFiles is the maximum amount of files which can be in a single
+	// block
+	CompressionBlockMaxFiles = 200
 )
 
 // Encoder writes the archive
@@ -37,6 +40,7 @@ type Encoder struct {
 
 	blockW      *brotli.Writer
 	blockSize   uint64
+	blockFiles  int
 	blockOffset uint64
 	blockMac    hash.Hash
 
@@ -247,13 +251,14 @@ func (e *Encoder) writeAlmanac() error {
 // Add will read a file and add it to the archive
 func (e *Encoder) Add(name string, modified uint64, r io.Reader) (int64, error) {
 
-	if e.blockSize >= CompressionBlockTarget {
+	if e.blockSize >= CompressionBlockTarget || e.blockFiles >= CompressionBlockMaxFiles {
 		// finalise block and create new one
 
 		e.closeBlock()
 
 		e.blockOffset += e.blockSize
 		e.blockSize = 0
+		e.blockFiles = 0
 
 		// create new brotil compressor which directs output into AES_256_CTR
 		// stream
@@ -268,6 +273,7 @@ func (e *Encoder) Add(name string, modified uint64, r io.Reader) (int64, error) 
 	}
 
 	e.blockSize += uint64(n)
+	e.blockFiles++
 
 	e.index = append(e.index, File{
 		Name:     name,
