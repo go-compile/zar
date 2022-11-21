@@ -14,8 +14,6 @@ func validateName(path string) bool {
 		return false
 	}
 
-	path = filepath.Clean(path)
-
 	if len(path) < 1 {
 		return false
 	}
@@ -24,6 +22,8 @@ func validateName(path string) bool {
 	if path[0] == '\\' || path[0] == '/' {
 		return false
 	}
+
+	path = filepath.Clean(path)
 
 	// Disallow traversing up a directory with ".." and prevent relative dir "."
 	if path[0] == '.' {
