@@ -93,11 +93,8 @@ func (d *Decoder) Extract(output string) error {
 	return nil
 }
 
+// TODO: refactor as compression blocks have been removed
 func (d *Decoder) extractBlock(files []File, ivBuf []byte) error {
-	// validate compression block
-	if len(files) > CompressionBlockMaxFiles {
-		return ErrFilesTooMany
-	}
 
 	// create a list of file descriptors
 	fds := make([]*os.File, 0, len(files))
