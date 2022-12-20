@@ -1,7 +1,6 @@
 package zar
 
 import (
-	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/hmac"
@@ -241,24 +240,23 @@ func (e *Encoder) Add(name string, modified uint64, r io.Reader) (int64, error) 
 	// stream
 	brotilW := brotli.NewWriterLevel(e.stream, e.compressionLevel)
 
-	debugPeakBuf := bytes.NewBuffer(nil)
-
 	// stream file -> compressor -> AES -> output file
 	//             -> SipHash
-	n, err := io.Copy(io.MultiWriter(brotilW, e.fileMac, debugPeakBuf), r)
+	n, err := io.Copy(io.MultiWriter(brotilW, e.fileMac), r)
 	if err != nil {
 		return n, err
 	}
 
+	mac := e.fileMac.Sum(nil)
+	fmt.Printf("MAC %X\n", mac)
+
 	// Sum MAC and compress it with block
-	brotilW.Write(e.fileMac.Sum(nil))
+	brotilW.Write(mac)
 	e.fileMac.Reset()
 
 	if err := brotilW.Close(); err != nil {
 		return 0, err
 	}
-
-	fmt.Printf("%s %X\n", name, debugPeakBuf.Bytes())
 
 	e.almanac = append(e.almanac, File{
 		Name:     name,

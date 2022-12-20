@@ -139,19 +139,36 @@ func (d *Decoder) extractFiles(files []File, ivBuf []byte) error {
 		// trim unrelated data
 		fmt.Printf("\tCipherBlockOffset: %d\n", f.CipherBlockOffset())
 		fmt.Printf("\tCipherBlockOffset End: %d\n", f.CipherBlockOffset()+f.Size)
-		compressedFileContents := buf.Bytes()[f.CipherBlockOffset() : f.CipherBlockOffset()+f.Size-9]
+		compressedFile := buf.Bytes()[f.CipherBlockOffset() : f.CipherBlockOffset()+f.Size-1]
 
-		fmt.Println(f.Name, compressedFileContents)
-		fmt.Printf("%s %X\n", f.Name, compressedFileContents)
-		fmt.Println(f.Name+" Len:", len(compressedFileContents))
+		fmt.Println(f.Name, compressedFile)
+		fmt.Printf("%s %X\n", f.Name, compressedFile)
+		fmt.Println(f.Name+" Len:", len(compressedFile))
 
 		result := make([]byte, 200)
-		n, err := brotli.NewReader(bytes.NewBuffer(compressedFileContents)).Read(result)
+		n, err := brotli.NewReader(bytes.NewBuffer(compressedFile)).Read(result)
 		if err != nil {
 			return err
 		}
 
+		// trim null data
+		result = result[:n]
+
 		fmt.Println(f.Name, string(result[:n]))
+		fmt.Println(f.Name, string(result[:n-8]))
+
+		mac := result[n-8:]
+		fmt.Println("len mac", len(mac))
+
+		fmt.Printf("MAC %X\n", mac)
+
+		// BUG: on the second file 7/8 bytes are null
+		d.mac.Write(result[:n-8])
+		if !bytes.Equal(d.mac.Sum(nil), mac) {
+			panic("message integrity failed")
+		}
+
+		d.mac.Reset()
 
 	}
 	// END FIRST ATTEMPT
