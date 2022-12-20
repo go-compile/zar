@@ -38,15 +38,15 @@ type Encoder struct {
 
 	stream *streamCipher
 
-	blockW      *brotli.Writer
+	brotilW     *brotli.Writer
 	blockSize   uint64
 	blockFiles  int
 	blockOffset uint64
 	blockMac    hash.Hash
 
-	compression     int
-	note            []byte
-	cipherBlockSize uint64
+	compressionLevel int
+	note             []byte
+	cipherBlockSize  uint64
 }
 
 // New creates a new ZAR encoder
@@ -114,11 +114,11 @@ func New(w io.Writer, key []byte) (*Encoder, error) {
 		k2: k2,
 		k3: k3,
 
-		stream:      &stream,
-		salt:        salt,
-		compression: brotli.DefaultCompression,
+		stream:           &stream,
+		salt:             salt,
+		compressionLevel: brotli.DefaultCompression,
 
-		blockW:   brotli.NewWriterLevel(&stream, brotli.DefaultCompression),
+		brotilW:  brotli.NewWriterLevel(&stream, brotli.DefaultCompression),
 		blockMac: siphash.New(k3),
 
 		cipherBlockSize: uint64(block.BlockSize()),
@@ -127,10 +127,10 @@ func New(w io.Writer, key []byte) (*Encoder, error) {
 
 func (e *Encoder) closeBlock() {
 	// Sum MAC and compress it with block
-	e.blockW.Write(e.blockMac.Sum(nil))
+	e.brotilW.Write(e.blockMac.Sum(nil))
 	e.blockMac.Reset()
 
-	e.blockW.Close()
+	e.brotilW.Close()
 }
 
 // Close must be called to finalise the archive
@@ -141,7 +141,7 @@ func (e *Encoder) Close() error {
 
 func (e *Encoder) writeAlmanac() error {
 	almanacOffset := e.stream.size
-	w := brotli.NewWriterLevel(e.stream, e.compression)
+	w := brotli.NewWriterLevel(e.stream, e.compressionLevel)
 
 	// write array size of almanac
 	fileCount := make([]byte, 8)
@@ -251,23 +251,13 @@ func (e *Encoder) writeAlmanac() error {
 // Add will read a file and add it to the archive
 func (e *Encoder) Add(name string, modified uint64, r io.Reader) (int64, error) {
 
-	if e.blockSize >= CompressionBlockTarget || e.blockFiles >= CompressionBlockMaxFiles {
-		// finalise block and create new one
-
-		e.closeBlock()
-
-		e.blockOffset += e.blockSize
-		e.blockSize = 0
-		e.blockFiles = 0
-
-		// create new brotil compressor which directs output into AES_256_CTR
-		// stream
-		e.blockW = brotli.NewWriterLevel(e.stream, e.compression)
-	}
+	// create new brotil compressor which directs output into AES_256_CTR
+	// stream
+	e.brotilW = brotli.NewWriterLevel(e.stream, e.compressionLevel)
 
 	// stream file -> compressor -> AES -> output file
 	//             -> SipHash
-	n, err := io.Copy(io.MultiWriter(e.blockW, e.blockMac), r)
+	n, err := io.Copy(io.MultiWriter(e.brotilW, e.blockMac), r)
 	if err != nil {
 		return n, err
 	}
