@@ -7,8 +7,10 @@ import (
 	"crypto/sha512"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"hash"
 	"io"
+	"math"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -91,14 +93,14 @@ func (d *Decoder) Extract(output string) error {
 	return nil
 }
 
-func (d *Decoder) extractBlock(compressionBlock []File, ivBuf []byte) error {
+func (d *Decoder) extractBlock(files []File, ivBuf []byte) error {
 	// validate compression block
-	if len(compressionBlock) > CompressionBlockMaxFiles {
+	if len(files) > CompressionBlockMaxFiles {
 		return ErrFilesTooMany
 	}
 
 	// create a list of file descriptors
-	fds := make([]*os.File, 0, len(compressionBlock))
+	fds := make([]*os.File, 0, len(files))
 	defer func() {
 		// close all descriptors on exit
 		for _, f := range fds {
@@ -107,7 +109,7 @@ func (d *Decoder) extractBlock(compressionBlock []File, ivBuf []byte) error {
 	}()
 
 	// create directory structure and open files
-	for _, f := range compressionBlock {
+	for _, f := range files {
 		if !validateName(f.Name) {
 			return ErrFileName
 		}
@@ -121,8 +123,30 @@ func (d *Decoder) extractBlock(compressionBlock []File, ivBuf []byte) error {
 		fds = append(fds, f)
 	}
 
-	// 	// d.decryptBlocks(int64(f.CipherBlock()), 0, ivBuf, nil)
-	// }
+	// START FIRST ATTEMPT
+	for i, f := range files {
+		// ignore files which have no contents
+		if f.Size == 0 {
+			continue
+		}
+
+		// cipherBlock 1 (starting block)
+		cb1 := f.CipherBlock() //TODO: refactor cipherblock from uint64 to int64
+		// cipherBlock end
+		cbEnd := cb1 + uint64(math.Ceil(float64(f.Size)/aes.BlockSize))
+
+		// TODO: convert to brotil stream (do not store file contents memory)
+		buf := bytes.NewBuffer(nil)
+		if err := d.decryptBlocks(int64(cb1), int64(cbEnd), ivBuf, buf); err != nil {
+			return err
+		}
+
+		// trim unrelated data
+		compressedFileContents := buf.Bytes()[f.CipherBlockOffset() : f.CipherBlockOffset()+f.Size]
+		fmt.Println(i, f.Name, compressedFileContents)
+		fmt.Println(i, string(compressedFileContents))
+	}
+	// END FIRST ATTEMPT
 
 	return nil
 }
