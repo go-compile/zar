@@ -33,8 +33,8 @@ type File struct {
 	Modified uint64
 	// Size refers to the size of the compressed file and mac
 	Size uint64
-	// Block is a offset from the start of the encrypted body
-	Block uint64
+	// Offset is a offset from the start of the encrypted body
+	Offset uint64
 }
 
 // Start returns the relative offset within the block to the start of
@@ -51,7 +51,7 @@ func (f *File) Start(index []File, id int) uint64 {
 	// regress until we find a match
 	for i := id - 1; i >= 0; i-- {
 		// if we find a different block break and return offset
-		if index[i].Block != f.Block {
+		if index[i].Offset != f.Offset {
 			return offset
 		}
 
@@ -70,15 +70,15 @@ func (f *File) End(start uint64) uint64 {
 // CipherBlock returns the ciphertext block ID of the compression
 // block
 func (f *File) CipherBlock() uint64 {
-	x := f.Block % aes.BlockSize
-	return (f.Block - x) / aes.BlockSize
+	x := f.Offset % aes.BlockSize
+	return (f.Offset - x) / aes.BlockSize
 }
 
 // CipherBlockOffset returns the distance between the start of the cipher's block
 // and the compression block's start
 func (f *File) CipherBlockOffset() uint64 {
 	cipherBlock := f.CipherBlock()
-	return f.Block - (cipherBlock * aes.BlockSize)
+	return f.Offset - (cipherBlock * aes.BlockSize)
 }
 
 // BlockSize returns the compressed length of the block
@@ -86,7 +86,7 @@ func (f *File) BlockSize(index []File, id int) uint64 {
 
 	// sum the sizes for all files within the same block
 	for i := id + 1; i < len(index); i++ {
-		if offset := index[i].Block; offset != f.Block {
+		if offset := index[i].Offset; offset != f.Offset {
 			return offset - f.Start(index, id)
 		}
 	}

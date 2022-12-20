@@ -1,12 +1,14 @@
 package zar
 
 import (
+	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha512"
 	"encoding/binary"
+	"fmt"
 	"hash"
 	"io"
 
@@ -135,7 +137,7 @@ func (e *Encoder) writeAlmanac() error {
 	buf := make([]byte, 8)
 	for i := 0; i < len(e.almanac); i++ {
 		// write block offset
-		binary.BigEndian.PutUint64(buf, e.almanac[i].Block)
+		binary.BigEndian.PutUint64(buf, e.almanac[i].Offset)
 		if _, err := w.Write(buf); err != nil {
 			return err
 		}
@@ -233,32 +235,40 @@ func (e *Encoder) Add(name string, modified uint64, r io.Reader) (int64, error) 
 
 	// will be used to calculate the size of the Brotil output
 	sizeBefore := e.stream.size
+	fmt.Printf("BEFORE === %-16s %s: %d\n", "Stream Size", name, sizeBefore)
 
 	// create new brotil compressor which directs output into AES_256_CTR
 	// stream
 	brotilW := brotli.NewWriterLevel(e.stream, e.compressionLevel)
 
+	debugPeakBuf := bytes.NewBuffer(nil)
+
 	// stream file -> compressor -> AES -> output file
 	//             -> SipHash
-	n, err := io.Copy(io.MultiWriter(e.brotilW, e.fileMac), r)
+	n, err := io.Copy(io.MultiWriter(brotilW, e.fileMac, debugPeakBuf), r)
 	if err != nil {
 		return n, err
 	}
-
-	// e.blockSize += uint64(n)
 
 	// Sum MAC and compress it with block
 	brotilW.Write(e.fileMac.Sum(nil))
 	e.fileMac.Reset()
 
-	brotilW.Close()
+	if err := brotilW.Close(); err != nil {
+		return 0, err
+	}
+
+	fmt.Printf("%s %X\n", name, debugPeakBuf.Bytes())
 
 	e.almanac = append(e.almanac, File{
 		Name:     name,
 		Modified: modified,
 		Size:     e.stream.size - sizeBefore,
-		Block:    sizeBefore / 16,
+		Offset:   sizeBefore, //TODO: calculate bytes from block start
 	})
+
+	fmt.Printf("AFTER  === %-16s %s: %d\n", "Stream Size", name, e.stream.size)
+	fmt.Printf("AFTER  === %-16s %s: %d\n", "Offset", name, e.stream.size-sizeBefore)
 
 	return n, nil
 }

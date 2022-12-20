@@ -13,7 +13,7 @@ const compressionBlockSize = 300
 func TestIndexStart(t *testing.T) {
 	_, files := generateFile(10)
 	for i, f := range files {
-		fmt.Printf("%d: Block: %d Len %d Start: %d CryptoBlock: %d Relative Crypto Block Offset: %d\n", i, f.Block, f.Size, f.Start(files, i), f.CipherBlock(), f.CipherBlockOffset())
+		fmt.Printf("%d: Block: %d Len %d Start: %d CryptoBlock: %d Relative Crypto Block Offset: %d\n", i, f.Offset, f.Size, f.Start(files, i), f.CipherBlock(), f.CipherBlockOffset())
 	}
 }
 
@@ -32,7 +32,7 @@ func generateFile(amount int) (files [][]byte, indexes []zar.File) {
 			Name:     "home",
 			Modified: 0,
 			Size:     uint64(len(data)),
-			Block:    blockOffset,
+			Offset:   blockOffset,
 		}
 
 		blockSize += len(data)
