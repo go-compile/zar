@@ -7,8 +7,10 @@ import (
 	"crypto/sha512"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"hash"
 	"io"
+	"math"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -45,10 +47,10 @@ type Decoder struct {
 	size       int64
 	bodyOffset int64
 
-	block           cipher.Block
-	cipherBlockSize int64
-	salt            []byte
-	compression     int
+	block            cipher.Block
+	cipherBlockSize  int64
+	salt             []byte
+	compressionLevel int
 
 	// output is the directory to write files to
 	output string
@@ -58,12 +60,12 @@ type Decoder struct {
 func NewDecoder(r io.ReaderAt, key []byte, size int64) (*Decoder, error) {
 
 	return &Decoder{
-		r:               r,
-		key:             key,
-		masterMac:       sha512.New(),
-		size:            size,
-		cipherBlockSize: aes.BlockSize,
-		compression:     brotli.DefaultCompression,
+		r:                r,
+		key:              key,
+		masterMac:        sha512.New(),
+		size:             size,
+		cipherBlockSize:  aes.BlockSize,
+		compressionLevel: brotli.DefaultCompression,
 	}, nil
 }
 
@@ -81,24 +83,18 @@ func (d *Decoder) Extract(output string) error {
 		return err
 	}
 
-	blocks := compressionBlocks(almanac.Files)
-	for _, block := range blocks {
-		if err := d.extractBlock(block, ivBuf); err != nil {
-			return err
-		}
+	if err := d.extractFiles(almanac.Files, ivBuf); err != nil {
+		return err
 	}
 
 	return nil
 }
 
-func (d *Decoder) extractBlock(compressionBlock []File, ivBuf []byte) error {
-	// validate compression block
-	if len(compressionBlock) > CompressionBlockMaxFiles {
-		return ErrFilesTooMany
-	}
+func (d *Decoder) extractFiles(files []File, ivBuf []byte) error {
 
+	// TODO: limit amount of open file descriptors
 	// create a list of file descriptors
-	fds := make([]*os.File, 0, len(compressionBlock))
+	fds := make([]*os.File, 0, len(files))
 	defer func() {
 		// close all descriptors on exit
 		for _, f := range fds {
@@ -107,7 +103,7 @@ func (d *Decoder) extractBlock(compressionBlock []File, ivBuf []byte) error {
 	}()
 
 	// create directory structure and open files
-	for _, f := range compressionBlock {
+	for _, f := range files {
 		if !validateName(f.Name) {
 			return ErrFileName
 		}
@@ -121,8 +117,61 @@ func (d *Decoder) extractBlock(compressionBlock []File, ivBuf []byte) error {
 		fds = append(fds, f)
 	}
 
-	// 	// d.decryptBlocks(int64(f.CipherBlock()), 0, ivBuf, nil)
-	// }
+	// START FIRST ATTEMPT
+	for _, f := range files {
+		// ignore files which have no contents
+		if f.Size == 0 {
+			continue
+		}
+
+		// cipherBlock 1 (starting block)
+		cb1 := f.CipherBlock() //TODO: refactor cipherblock from uint64 to int64
+		// cipherBlock end
+		cbEnd := cb1 + uint64(math.Ceil(float64(f.Size)/aes.BlockSize))
+
+		// TODO: convert to brotil stream (do not store file contents memory)
+		buf := bytes.NewBuffer(nil)
+		if err := d.decryptBlocks(int64(cb1), int64(cbEnd), ivBuf, buf); err != nil {
+			return err
+		}
+		fmt.Printf("%s CB1: %d - CB-End: %d\n", f.Name, cb1, cbEnd)
+
+		// trim unrelated data
+		fmt.Printf("\tCipherBlockOffset: %d\n", f.CipherBlockOffset())
+		fmt.Printf("\tCipherBlockOffset End: %d\n", f.CipherBlockOffset()+f.Size)
+		compressedFile := buf.Bytes()[f.CipherBlockOffset() : f.CipherBlockOffset()+f.Size-1]
+
+		fmt.Println(f.Name, compressedFile)
+		fmt.Printf("%s %X\n", f.Name, compressedFile)
+		fmt.Println(f.Name+" Len:", len(compressedFile))
+
+		result := make([]byte, 200)
+		n, err := brotli.NewReader(bytes.NewBuffer(compressedFile)).Read(result)
+		if err != nil {
+			return err
+		}
+
+		// trim null data
+		result = result[:n]
+
+		fmt.Println(f.Name, string(result[:n]))
+		fmt.Println(f.Name, string(result[:n-8]))
+
+		mac := result[n-8:]
+		fmt.Println("len mac", len(mac))
+
+		fmt.Printf("MAC %X\n", mac)
+
+		// BUG: on the second file 7/8 bytes are null
+		d.mac.Write(result[:n-8])
+		if !bytes.Equal(d.mac.Sum(nil), mac) {
+			panic("message integrity failed")
+		}
+
+		d.mac.Reset()
+
+	}
+	// END FIRST ATTEMPT
 
 	return nil
 }

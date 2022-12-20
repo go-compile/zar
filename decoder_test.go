@@ -40,14 +40,14 @@ func encodeArchive() ([]byte, error) {
 		return nil, err
 	}
 
-	buf = bytes.NewBuffer([]byte("another file"))
-	_, err = archive.Add("test2.txt", 0, buf)
+	buf2 := bytes.NewBuffer([]byte("another file"))
+	_, err = archive.Add("test2.txt", 0, buf2)
 	if err != nil {
 		return nil, err
 	}
 
-	buf = bytes.NewBuffer([]byte("mid 18th Century"))
-	_, err = archive.Add("some/file.txt", 0, buf)
+	buf3 := bytes.NewBuffer([]byte("mid 18th Century"))
+	_, err = archive.Add("some/file.txt", 0, buf3)
 	if err != nil {
 		return nil, err
 	}

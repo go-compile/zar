@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"crypto/sha512"
 	"encoding/binary"
+	"fmt"
 	"hash"
 	"io"
 
@@ -16,16 +17,6 @@ import (
 	"golang.org/x/crypto/hkdf"
 )
 
-const (
-	// CompressionBlockTarget is the "soft minimum" size of a compression block
-	//
-	// A block can be smaller but only if its the last block
-	CompressionBlockTarget uint64 = 1000 //1mb
-	// CompressionBlockMaxFiles is the maximum amount of files which can be in a single
-	// block
-	CompressionBlockMaxFiles = 200
-)
-
 // Encoder writes the archive
 type Encoder struct {
 	w io.Writer
@@ -33,20 +24,18 @@ type Encoder struct {
 	// k1 is the key used for encryption and HMACs
 	k1, k2, k3 []byte
 	// salt is used in the key KDF
-	salt  []byte
-	index []File
+	salt    []byte
+	almanac []File
 
 	stream *streamCipher
 
-	blockW      *brotli.Writer
-	blockSize   uint64
-	blockFiles  int
-	blockOffset uint64
-	blockMac    hash.Hash
+	brotilW *brotli.Writer
+	// fileMac is used to hash the individual files in the repo
+	fileMac hash.Hash
 
-	compression     int
-	note            []byte
-	cipherBlockSize uint64
+	compressionLevel int
+	note             []byte
+	cipherBlockSize  uint64
 }
 
 // New creates a new ZAR encoder
@@ -114,89 +103,81 @@ func New(w io.Writer, key []byte) (*Encoder, error) {
 		k2: k2,
 		k3: k3,
 
-		stream:      &stream,
-		salt:        salt,
-		compression: brotli.DefaultCompression,
+		stream:           &stream,
+		salt:             salt,
+		compressionLevel: brotli.DefaultCompression,
 
-		blockW:   brotli.NewWriterLevel(&stream, brotli.DefaultCompression),
-		blockMac: siphash.New(k3),
+		brotilW: brotli.NewWriterLevel(&stream, brotli.DefaultCompression),
+		fileMac: siphash.New(k3),
 
 		cipherBlockSize: uint64(block.BlockSize()),
 	}, nil
 }
 
-func (e *Encoder) closeBlock() {
-	// Sum MAC and compress it with block
-	e.blockW.Write(e.blockMac.Sum(nil))
-	e.blockMac.Reset()
-
-	e.blockW.Close()
-}
-
 // Close must be called to finalise the archive
 func (e *Encoder) Close() error {
-	e.closeBlock()
+	// e.closeBlock()
 	return e.writeAlmanac()
 }
 
 func (e *Encoder) writeAlmanac() error {
 	almanacOffset := e.stream.size
-	w := brotli.NewWriterLevel(e.stream, e.compression)
+	w := brotli.NewWriterLevel(e.stream, e.compressionLevel)
 
 	// write array size of almanac
 	fileCount := make([]byte, 8)
-	binary.BigEndian.PutUint64(fileCount, uint64(len(e.index)))
+	binary.BigEndian.PutUint64(fileCount, uint64(len(e.almanac)))
 	if _, err := w.Write(fileCount); err != nil {
 		return err
 	}
 
-	e.blockMac.Write(fileCount)
+	e.fileMac.Write(fileCount)
 
 	buf := make([]byte, 8)
-	for i := 0; i < len(e.index); i++ {
+	for i := 0; i < len(e.almanac); i++ {
 		// write block offset
-		binary.BigEndian.PutUint64(buf, e.index[i].Block)
+		binary.BigEndian.PutUint64(buf, e.almanac[i].Offset)
 		if _, err := w.Write(buf); err != nil {
 			return err
 		}
 
 		// compute message authentication code
-		e.blockMac.Write(buf)
+		e.fileMac.Write(buf)
 
 		// write file size
-		binary.BigEndian.PutUint64(buf, e.index[i].Size)
+		binary.BigEndian.PutUint64(buf, e.almanac[i].Size)
 		if _, err := w.Write(buf); err != nil {
 			return err
 		}
 
 		// compute message authentication code
-		e.blockMac.Write(buf)
+		e.fileMac.Write(buf)
 
 		// write modified date
-		binary.BigEndian.PutUint64(buf, e.index[i].Modified)
+		binary.BigEndian.PutUint64(buf, e.almanac[i].Modified)
 		if _, err := w.Write(buf); err != nil {
 			return err
 		}
 
 		// compute message authentication code
-		e.blockMac.Write(buf)
+		e.fileMac.Write(buf)
 
 		// write file name length
-		binary.BigEndian.PutUint16(buf, uint16(len(e.index[i].Name)))
+		binary.BigEndian.PutUint16(buf, uint16(len(e.almanac[i].Name)))
 		if _, err := w.Write(buf[:2]); err != nil {
 			return err
 		}
 
 		// compute message authentication code
-		e.blockMac.Write(buf[:2])
+		e.fileMac.Write(buf[:2])
 
 		// write file name
-		if _, err := w.Write([]byte(e.index[i].Name)); err != nil {
+		if _, err := w.Write([]byte(e.almanac[i].Name)); err != nil {
 			return err
 		}
 
 		// compute message authentication code
-		e.blockMac.Write([]byte(e.index[i].Name))
+		e.fileMac.Write([]byte(e.almanac[i].Name))
 	}
 
 	// write note length
@@ -206,7 +187,7 @@ func (e *Encoder) writeAlmanac() error {
 	}
 
 	// compute message authentication code
-	e.blockMac.Write(buf[:2])
+	e.fileMac.Write(buf[:2])
 
 	// write note
 	if _, err := w.Write(e.note); err != nil {
@@ -214,14 +195,14 @@ func (e *Encoder) writeAlmanac() error {
 	}
 
 	// compute message authentication code
-	e.blockMac.Write(e.note)
+	e.fileMac.Write(e.note)
 
 	// write almanac mac
-	if _, err := w.Write([]byte(e.blockMac.Sum(nil))); err != nil {
+	if _, err := w.Write([]byte(e.fileMac.Sum(nil))); err != nil {
 		return err
 	}
 
-	e.blockMac.Reset()
+	e.fileMac.Reset()
 
 	// finalise compression
 	if err := w.Close(); err != nil {
@@ -251,36 +232,41 @@ func (e *Encoder) writeAlmanac() error {
 // Add will read a file and add it to the archive
 func (e *Encoder) Add(name string, modified uint64, r io.Reader) (int64, error) {
 
-	if e.blockSize >= CompressionBlockTarget || e.blockFiles >= CompressionBlockMaxFiles {
-		// finalise block and create new one
+	// will be used to calculate the size of the Brotil output
+	sizeBefore := e.stream.size
+	fmt.Printf("BEFORE === %-16s %s: %d\n", "Stream Size", name, sizeBefore)
 
-		e.closeBlock()
-
-		e.blockOffset += e.blockSize
-		e.blockSize = 0
-		e.blockFiles = 0
-
-		// create new brotil compressor which directs output into AES_256_CTR
-		// stream
-		e.blockW = brotli.NewWriterLevel(e.stream, e.compression)
-	}
+	// create new brotil compressor which directs output into AES_256_CTR
+	// stream
+	brotilW := brotli.NewWriterLevel(e.stream, e.compressionLevel)
 
 	// stream file -> compressor -> AES -> output file
 	//             -> SipHash
-	n, err := io.Copy(io.MultiWriter(e.blockW, e.blockMac), r)
+	n, err := io.Copy(io.MultiWriter(brotilW, e.fileMac), r)
 	if err != nil {
 		return n, err
 	}
 
-	e.blockSize += uint64(n)
-	e.blockFiles++
+	mac := e.fileMac.Sum(nil)
+	fmt.Printf("MAC %X\n", mac)
 
-	e.index = append(e.index, File{
+	// Sum MAC and compress it with block
+	brotilW.Write(mac)
+	e.fileMac.Reset()
+
+	if err := brotilW.Close(); err != nil {
+		return 0, err
+	}
+
+	e.almanac = append(e.almanac, File{
 		Name:     name,
 		Modified: modified,
-		Size:     uint64(n),
-		Block:    e.blockOffset,
+		Size:     e.stream.size - sizeBefore,
+		Offset:   sizeBefore, //TODO: calculate bytes from block start
 	})
+
+	fmt.Printf("AFTER  === %-16s %s: %d\n", "Stream Size", name, e.stream.size)
+	fmt.Printf("AFTER  === %-16s %s: %d\n", "Offset", name, e.stream.size-sizeBefore)
 
 	return n, nil
 }

@@ -80,7 +80,7 @@ func decodeAlmanac(r io.Reader, h hash.Hash) (*Almanac, error) {
 		h.Write(name)
 
 		f := File{
-			Block:    binary.BigEndian.Uint64(block),
+			Offset:   binary.BigEndian.Uint64(block),
 			Size:     binary.BigEndian.Uint64(size),
 			Modified: binary.BigEndian.Uint64(modified),
 			Name:     string(name),
@@ -118,27 +118,4 @@ func decodeAlmanac(r io.Reader, h hash.Hash) (*Almanac, error) {
 
 	return almanac, nil
 
-}
-
-// compressionBlocks takes a almanac and returns each compression block
-func compressionBlocks(almanac []File) (compressionBlocks [][]File) {
-	lastBlock := uint64(0)
-	files := make([]File, 0)
-
-	for i := 0; i < len(almanac); i++ {
-		if block := almanac[i].Block; block != uint64(lastBlock) {
-			lastBlock = block
-
-			compressionBlocks = append(compressionBlocks, files)
-			files = nil
-		}
-
-		files = append(files, almanac[i])
-	}
-
-	if len(files) > 0 {
-		compressionBlocks = append(compressionBlocks, files)
-	}
-
-	return compressionBlocks
 }

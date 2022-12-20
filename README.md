@@ -5,6 +5,8 @@ Utilising [AES 256](https://en.wikipedia.org/wiki/Advanced_Encryption_Standard),
 
 Built to maximise security and compression ratio, all the while being streamable and fast. Utilising AES_256_CTR + SipHash to encrypt and authenticate the archive without requiring the whole file being extracted/read.
 
+**WARNING: PROJECT UNDER DEVELOPMENT & IS NOT STABLE**
+
 ## Archive Format
 
 ```
