@@ -31,7 +31,7 @@ type File struct {
 	Name string
 	// Modified is the file modified date
 	Modified uint64
-	// Size refers to the size of the file in bytes
+	// Size refers to the size of the compressed file and mac
 	Size uint64
 	// Block is a offset from the start of the encrypted body
 	Block uint64

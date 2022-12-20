@@ -33,8 +33,8 @@ type Encoder struct {
 	// k1 is the key used for encryption and HMACs
 	k1, k2, k3 []byte
 	// salt is used in the key KDF
-	salt  []byte
-	index []File
+	salt    []byte
+	almanac []File
 
 	stream *streamCipher
 
@@ -145,7 +145,7 @@ func (e *Encoder) writeAlmanac() error {
 
 	// write array size of almanac
 	fileCount := make([]byte, 8)
-	binary.BigEndian.PutUint64(fileCount, uint64(len(e.index)))
+	binary.BigEndian.PutUint64(fileCount, uint64(len(e.almanac)))
 	if _, err := w.Write(fileCount); err != nil {
 		return err
 	}
@@ -153,9 +153,9 @@ func (e *Encoder) writeAlmanac() error {
 	e.blockMac.Write(fileCount)
 
 	buf := make([]byte, 8)
-	for i := 0; i < len(e.index); i++ {
+	for i := 0; i < len(e.almanac); i++ {
 		// write block offset
-		binary.BigEndian.PutUint64(buf, e.index[i].Block)
+		binary.BigEndian.PutUint64(buf, e.almanac[i].Block)
 		if _, err := w.Write(buf); err != nil {
 			return err
 		}
@@ -164,7 +164,7 @@ func (e *Encoder) writeAlmanac() error {
 		e.blockMac.Write(buf)
 
 		// write file size
-		binary.BigEndian.PutUint64(buf, e.index[i].Size)
+		binary.BigEndian.PutUint64(buf, e.almanac[i].Size)
 		if _, err := w.Write(buf); err != nil {
 			return err
 		}
@@ -173,7 +173,7 @@ func (e *Encoder) writeAlmanac() error {
 		e.blockMac.Write(buf)
 
 		// write modified date
-		binary.BigEndian.PutUint64(buf, e.index[i].Modified)
+		binary.BigEndian.PutUint64(buf, e.almanac[i].Modified)
 		if _, err := w.Write(buf); err != nil {
 			return err
 		}
@@ -182,7 +182,7 @@ func (e *Encoder) writeAlmanac() error {
 		e.blockMac.Write(buf)
 
 		// write file name length
-		binary.BigEndian.PutUint16(buf, uint16(len(e.index[i].Name)))
+		binary.BigEndian.PutUint16(buf, uint16(len(e.almanac[i].Name)))
 		if _, err := w.Write(buf[:2]); err != nil {
 			return err
 		}
@@ -191,12 +191,12 @@ func (e *Encoder) writeAlmanac() error {
 		e.blockMac.Write(buf[:2])
 
 		// write file name
-		if _, err := w.Write([]byte(e.index[i].Name)); err != nil {
+		if _, err := w.Write([]byte(e.almanac[i].Name)); err != nil {
 			return err
 		}
 
 		// compute message authentication code
-		e.blockMac.Write([]byte(e.index[i].Name))
+		e.blockMac.Write([]byte(e.almanac[i].Name))
 	}
 
 	// write note length
@@ -275,7 +275,7 @@ func (e *Encoder) Add(name string, modified uint64, r io.Reader) (int64, error) 
 	e.blockSize += uint64(n)
 	e.blockFiles++
 
-	e.index = append(e.index, File{
+	e.almanac = append(e.almanac, File{
 		Name:     name,
 		Modified: modified,
 		Size:     uint64(n),
